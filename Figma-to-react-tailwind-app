@@ -1,0 +1,356 @@
+/*
+Figma-to-React-Tailwind-App
+Single-file React component (default export) that implements a responsive UI with local-browser data storage,
+loading & error states, and basic CRUD as shown in typical Figma prototypes.
+
+Setup (recommended):
+1) Create app using Vite (fast):
+   npm create vite@latest my-app -- --template react
+   cd my-app
+2) Install dependencies:
+   npm install
+3) Install Tailwind CSS (official steps):
+   npm install -D tailwindcss postcss autoprefixer
+   npx tailwindcss init -p
+   // then in tailwind.config.cjs add: content: ['./index.html','./src/**/*.{js,jsx,ts,tsx}']
+   // in src/index.css add the @tailwind directives:
+   @tailwind base;
+   @tailwind components;
+   @tailwind utilities;
+4) Replace src/App.jsx with this file's content. Ensure src/main.jsx imports './index.css'.
+5) Start dev server: npm run dev
+
+This file intentionally contains a self-contained React component that uses Tailwind classes.
+If you prefer Bootstrap instead, I can provide an alternative.
+*/
+
+import React, { useEffect, useState } from 'react';
+
+// Utilities
+const uid = () => Math.random().toString(36).slice(2, 9);
+
+// Mock initial data — used only if localStorage is empty
+const DEFAULT_ITEMS = [
+  { id: uid(), title: 'Design System Audit', owner: 'Alex', status: 'In Progress', description: 'Audit buttons, tokens and layout spacing.' },
+  { id: uid(), title: 'User Onboarding Flow', owner: 'Priya', status: 'Planned', description: 'Create flows & copy for first-time users.' },
+  { id: uid(), title: 'Performance Budget', owner: 'Sam', status: 'Completed', description: 'Set metrics and budgets for core pages.' },
+];
+
+export default function App() {
+  // App states
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [form, setForm] = useState({ title: '', owner: '', status: 'Planned', description: '' });
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Simulate load from "server" (localStorage) with delay to show load states
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    const t = setTimeout(() => {
+      try {
+        const raw = localStorage.getItem('figma_app_items');
+        const parsed = raw ? JSON.parse(raw) : DEFAULT_ITEMS;
+        setItems(parsed);
+        setLoading(false);
+      } catch (e) {
+        console.error(e);
+        setError('Failed to load data.');
+        setLoading(false);
+      }
+    }, 700); // short delay to demonstrate load state
+
+    return () => clearTimeout(t);
+  }, []);
+
+  // Persist items when changed
+  useEffect(() => {
+    try {
+      localStorage.setItem('figma_app_items', JSON.stringify(items));
+    } catch (e) {
+      console.error('Persist error', e);
+      setError('Failed to save to browser storage.');
+    }
+  }, [items]);
+
+  // CRUD operations
+  function handleCreate(e) {
+    e.preventDefault();
+    setIsSaving(true);
+    setError(null);
+    // validation
+    if (!form.title.trim()) {
+      setError('Title is required.');
+      setIsSaving(false);
+      return;
+    }
+
+    setTimeout(() => {
+      const newItem = { ...form, id: uid() };
+      setItems(prev => [newItem, ...prev]);
+      setForm({ title: '', owner: '', status: 'Planned', description: '' });
+      setIsSaving(false);
+    }, 500);
+  }
+
+  function handleDelete(id) {
+    if (!confirm('Delete this item?')) return;
+    setItems(prev => prev.filter(it => it.id !== id));
+    if (selected && selected.id === id) setSelected(null);
+  }
+
+  function handleSelect(item) {
+    setSelected(item === selected ? null : item);
+  }
+
+  function handleUpdate(updated) {
+    setItems(prev => prev.map(it => (it.id === updated.id ? updated : it)));
+    setSelected(updated);
+  }
+
+  // filtering
+  const visible = items.filter(it => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      it.title.toLowerCase().includes(q) ||
+      it.owner.toLowerCase().includes(q) ||
+      it.description.toLowerCase().includes(q)
+    );
+  });
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans">
+      <header className="max-w-7xl mx-auto mb-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-semibold">Project Dashboard</h1>
+            <p className="text-sm text-slate-600">A responsive app built to match Figma visuals — local browser storage, load & error states.</p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <input
+              aria-label="Search"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              className="w-40 md:w-64 rounded-md border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+              placeholder="Search projects..."
+            />
+            <button
+              onClick={() => {
+                // allow user to simulate an error for demo
+                setError(prev => (prev ? null : 'Simulated error — click to clear'));
+              }}
+              className="rounded-md px-3 py-2 text-sm bg-white border border-slate-200 hover:bg-slate-50"
+            >
+              {error ? 'Clear Error' : 'Simulate Error'}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Left pane: form */}
+        <section className="lg:col-span-1 bg-white rounded-2xl p-4 shadow-sm">
+          <h2 className="text-lg font-medium mb-3">Create Project</h2>
+          <form onSubmit={handleCreate} className="space-y-3">
+            <div>
+              <label className="block text-sm text-slate-700">Title</label>
+              <input
+                value={form.title}
+                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
+                placeholder="E.g., Landing page refresh"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-slate-700">Owner</label>
+              <input
+                value={form.owner}
+                onChange={e => setForm(f => ({ ...f, owner: e.target.value }))}
+                className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
+                placeholder="Owner name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-slate-700">Status</label>
+              <select
+                value={form.status}
+                onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+                className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
+              >
+                <option>Planned</option>
+                <option>In Progress</option>
+                <option>Completed</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm text-slate-700">Description</label>
+              <textarea
+                value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                rows={3}
+                className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
+                placeholder="Short description"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="inline-flex items-center gap-2 rounded-md bg-slate-900 text-white px-4 py-2 text-sm hover:opacity-95 disabled:opacity-50"
+              >
+                {isSaving ? 'Saving...' : 'Add Project'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setForm({ title: '', owner: '', status: 'Planned', description: '' });
+                }}
+                className="rounded-md px-3 py-2 text-sm bg-white border border-slate-200"
+              >
+                Reset
+              </button>
+            </div>
+
+            {error && <div className="text-sm text-red-600">{error}</div>}
+          </form>
+
+          <div className="mt-4 text-xs text-slate-500">Tip: data is stored in your browser (localStorage).</div>
+        </section>
+
+        {/* Right pane: list + detail */}
+        <section className="lg:col-span-3 space-y-4">
+          <div className="bg-white rounded-2xl p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-md font-medium">Projects</h3>
+              <div className="text-sm text-slate-500">{visible.length} shown</div>
+            </div>
+
+            {/* Load & error states */}
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-10 w-10 border-4 border-slate-300 border-t-slate-800" />
+              </div>
+            ) : error ? (
+              <div className="p-6 text-sm text-red-700 bg-red-50 rounded">{error}</div>
+            ) : visible.length === 0 ? (
+              <div className="p-6 text-sm text-slate-600">No projects match your search.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {visible.map(item => (
+                  <article key={item.id} className="bg-slate-50 rounded-xl p-4 border border-transparent hover:border-slate-200">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-semibold">{item.title}</h4>
+                        <p className="text-xs text-slate-500 mt-1">{item.owner} • <span className="font-medium">{item.status}</span></p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleSelect(item)}
+                          aria-pressed={selected && selected.id === item.id}
+                          className="rounded-md px-2 py-1 text-xs bg-white border border-slate-200"
+                        >
+                          {selected && selected.id === item.id ? 'Selected' : 'View'}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(item.id)}
+                          className="rounded-md px-2 py-1 text-xs bg-white border border-red-200 text-red-600"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="mt-3 text-xs text-slate-600">{item.description}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Detail / edit pane */}
+          <div className="bg-white rounded-2xl p-4 shadow-sm">
+            <h3 className="text-md font-medium mb-3">Details</h3>
+            {selected ? (
+              <ProjectDetail
+                item={selected}
+                onCancel={() => setSelected(null)}
+                onSave={handleUpdate}
+              />
+            ) : (
+              <div className="text-sm text-slate-600">Select a project card to view and edit details.</div>
+            )}
+          </div>
+        </section>
+      </main>
+
+      <footer className="max-w-7xl mx-auto mt-8 text-center text-xs text-slate-400">Built with React + Tailwind • Local data only</footer>
+    </div>
+  );
+}
+
+function ProjectDetail({ item, onCancel, onSave }) {
+  const [local, setLocal] = useState(item);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => setLocal(item), [item]);
+
+  function save() {
+    setErr(null);
+    if (!local.title.trim()) {
+      setErr('Title required');
+      return;
+    }
+    setSaving(true);
+    setTimeout(() => {
+      onSave(local);
+      setSaving(false);
+    }, 400);
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="block text-xs text-slate-600">Title</label>
+        <input value={local.title} onChange={e => setLocal(l => ({ ...l, title: e.target.value }))} className="mt-1 block w-full rounded-md border px-3 py-2 text-sm" />
+      </div>
+
+      <div>
+        <label className="block text-xs text-slate-600">Owner</label>
+        <input value={local.owner} onChange={e => setLocal(l => ({ ...l, owner: e.target.value }))} className="mt-1 block w-full rounded-md border px-3 py-2 text-sm" />
+      </div>
+
+      <div>
+        <label className="block text-xs text-slate-600">Status</label>
+        <select value={local.status} onChange={e => setLocal(l => ({ ...l, status: e.target.value }))} className="mt-1 block w-full rounded-md border px-3 py-2 text-sm">
+          <option>Planned</option>
+          <option>In Progress</option>
+          <option>Completed</option>
+        </select>
+      </div>
+
+      <div>
+        <label className="block text-xs text-slate-600">Description</label>
+        <textarea value={local.description} onChange={e => setLocal(l => ({ ...l, description: e.target.value }))} rows={4} className="mt-1 block w-full rounded-md border px-3 py-2 text-sm" />
+      </div>
+
+      {err && <div className="text-red-600 text-sm">{err}</div>}
+
+      <div className="flex items-center gap-2">
+        <button onClick={save} disabled={saving} className="rounded-md bg-slate-900 text-white px-4 py-2 text-sm disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
+        <button onClick={onCancel} className="rounded-md px-3 py-2 bg-white border border-slate-200 text-sm">Cancel</button>
+      </div>
+    </div>
+  );
+}

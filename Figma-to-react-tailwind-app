@@ -1,355 +1,334 @@
-/*
-Figma-to-React-Tailwind-App
-Single-file React component (default export) that implements a responsive UI with local-browser data storage,
-loading & error states, and basic CRUD as shown in typical Figma prototypes.
+import React, { useEffect, useState } from "react";
 
-Setup (recommended):
-1) Create app using Vite (fast):
-   npm create vite@latest my-app -- --template react
-   cd my-app
-2) Install dependencies:
-   npm install
-3) Install Tailwind CSS (official steps):
-   npm install -D tailwindcss postcss autoprefixer
-   npx tailwindcss init -p
-   // then in tailwind.config.cjs add: content: ['./index.html','./src/**/*.{js,jsx,ts,tsx}']
-   // in src/index.css add the @tailwind directives:
-   @tailwind base;
-   @tailwind components;
-   @tailwind utilities;
-4) Replace src/App.jsx with this file's content. Ensure src/main.jsx imports './index.css'.
-5) Start dev server: npm run dev
+// Single-file React app (App.jsx) built for Tailwind CSS
+// Default export is the App component. Paste into a Vite/CRA project as src/App.jsx
+// Tailwind must be configured in the project for styling to work.
 
-This file intentionally contains a self-contained React component that uses Tailwind classes.
-If you prefer Bootstrap instead, I can provide an alternative.
-*/
+const STORAGE_KEY = "app.tasks.v1";
 
-import React, { useEffect, useState } from 'react';
+// Simple helper to read/write localStorage with safety
+function readTasksFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null; // indicate no saved data
+    return JSON.parse(raw);
+  } catch (e) {
+    // invalid JSON or storage permission error
+    throw new Error("Failed to read from local storage: " + e.message);
+  }
+}
 
-// Utilities
-const uid = () => Math.random().toString(36).slice(2, 9);
+function writeTasksToStorage(tasks) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+  } catch (e) {
+    throw new Error("Failed to save to local storage: " + e.message);
+  }
+}
 
-// Mock initial data — used only if localStorage is empty
-const DEFAULT_ITEMS = [
-  { id: uid(), title: 'Design System Audit', owner: 'Alex', status: 'In Progress', description: 'Audit buttons, tokens and layout spacing.' },
-  { id: uid(), title: 'User Onboarding Flow', owner: 'Priya', status: 'Planned', description: 'Create flows & copy for first-time users.' },
-  { id: uid(), title: 'Performance Budget', owner: 'Sam', status: 'Completed', description: 'Set metrics and budgets for core pages.' },
-];
+function uid() {
+  return Math.random().toString(36).slice(2, 9);
+}
+
+function Loading() {
+  return (
+    <div className="flex items-center justify-center py-12">
+      <div className="animate-spin rounded-full h-12 w-12 border-4 border-gray-300 border-t-gray-700" />
+    </div>
+  );
+}
+
+function ErrorBox({ message, onRetry }) {
+  return (
+    <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-4">
+      <div className="font-medium">Something went wrong</div>
+      <div className="mt-1 text-sm">{message}</div>
+      {onRetry && (
+        <div className="mt-3">
+          <button
+            onClick={onRetry}
+            className="px-3 py-1 bg-red-600 text-white rounded hover:opacity-90"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Header({ count }) {
+  return (
+    <header className="flex items-center justify-between mb-6">
+      <div>
+        <h1 className="text-2xl font-semibold">Task Dashboard</h1>
+        <p className="text-sm text-gray-500">Manage tasks locally in your browser</p>
+      </div>
+      <div className="text-right">
+        <div className="text-sm text-gray-500">Total</div>
+        <div className="text-lg font-medium">{count}</div>
+      </div>
+    </header>
+  );
+}
+
+function TaskCard({ task, onEdit, onDelete, onToggleDone }) {
+  return (
+    <div className="p-4 bg-white rounded-2xl shadow-sm border">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className={`text-lg font-medium ${task.done ? 'line-through text-gray-400' : ''}`}>{task.title}</div>
+          <div className="text-sm text-gray-500 mt-1">{task.description}</div>
+          <div className="mt-3 flex gap-2 text-xs">
+            <div className="px-2 py-1 bg-gray-100 rounded">Priority: {task.priority}</div>
+            <div className="px-2 py-1 bg-gray-100 rounded">Due: {task.dueDate || '—'}</div>
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <button
+            onClick={() => onToggleDone(task.id)}
+            className={`px-3 py-1 rounded-lg text-sm border ${task.done ? 'bg-green-50 border-green-400' : 'bg-white border-gray-200'}`}>
+            {task.done ? 'Done' : 'Mark done'}
+          </button>
+          <button onClick={() => onEdit(task)} className="px-3 py-1 rounded-lg text-sm border border-gray-200">Edit</button>
+          <button onClick={() => onDelete(task.id)} className="px-3 py-1 rounded-lg text-sm border border-red-200 text-red-600">Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TaskForm({ initial = null, onCancel, onSave }) {
+  const [title, setTitle] = useState(initial?.title || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const [priority, setPriority] = useState(initial?.priority || "Medium");
+  const [dueDate, setDueDate] = useState(initial?.dueDate || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    setError(null);
+    if (!title.trim()) return setError("Title is required");
+    setSaving(true);
+    // simulate small delay for UX
+    setTimeout(() => {
+      const payload = {
+        id: initial?.id || uid(),
+        title: title.trim(),
+        description: description.trim(),
+        priority,
+        dueDate,
+        done: initial?.done || false,
+        updatedAt: new Date().toISOString(),
+      };
+      setSaving(false);
+      onSave(payload);
+    }, 500);
+  }
+
+  return (
+    <form className="space-y-3" onSubmit={handleSubmit}>
+      <div>
+        <label className="block text-sm font-medium">Title</label>
+        <input value={title} onChange={e => setTitle(e.target.value)} className="mt-1 block w-full rounded-md border-gray-200 shadow-sm p-2" />
+      </div>
+      <div>
+        <label className="block text-sm font-medium">Description</label>
+        <textarea value={description} onChange={e => setDescription(e.target.value)} className="mt-1 block w-full rounded-md border-gray-200 shadow-sm p-2" rows={3} />
+      </div>
+      <div className="flex gap-3">
+        <div className="flex-1">
+          <label className="block text-sm font-medium">Priority</label>
+          <select value={priority} onChange={e => setPriority(e.target.value)} className="mt-1 block w-full rounded-md border-gray-200 p-2">
+            <option>Low</option>
+            <option>Medium</option>
+            <option>High</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium">Due</label>
+          <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="mt-1 block rounded-md border-gray-200 p-2" />
+        </div>
+      </div>
+      {error && <div className="text-sm text-red-600">{error}</div>}
+      <div className="flex items-center gap-2">
+        <button type="submit" disabled={saving} className="px-4 py-2 bg-sky-600 text-white rounded-lg">{saving ? 'Saving...' : 'Save'}</button>
+        <button type="button" onClick={onCancel} className="px-4 py-2 border rounded-lg">Cancel</button>
+      </div>
+    </form>
+  );
+}
 
 export default function App() {
-  // App states
-  const [items, setItems] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState(null);
-  const [form, setForm] = useState({ title: '', owner: '', status: 'Planned', description: '' });
-  const [isSaving, setIsSaving] = useState(false);
 
-  // Simulate load from "server" (localStorage) with delay to show load states
+  const [editing, setEditing] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [filter, setFilter] = useState("all");
+
+  // Load with simulated network delay, then fallback to seeded data
   useEffect(() => {
     setLoading(true);
     setError(null);
     const t = setTimeout(() => {
       try {
-        const raw = localStorage.getItem('figma_app_items');
-        const parsed = raw ? JSON.parse(raw) : DEFAULT_ITEMS;
-        setItems(parsed);
-        setLoading(false);
+        const stored = readTasksFromStorage();
+        if (stored === null) {
+          const seed = [
+            { id: uid(), title: "Design review", description: "Review the new UI visuals", priority: "High", dueDate: "", done: false },
+            { id: uid(), title: "Write doc", description: "Complete feature spec", priority: "Medium", dueDate: "", done: false },
+          ];
+          setTasks(seed);
+          writeTasksToStorage(seed);
+        } else {
+          setTasks(stored);
+        }
       } catch (e) {
-        console.error(e);
-        setError('Failed to load data.');
+        setError(e.message);
+      } finally {
         setLoading(false);
       }
-    }, 700); // short delay to demonstrate load state
-
+    }, 700);
     return () => clearTimeout(t);
   }, []);
 
-  // Persist items when changed
-  useEffect(() => {
+  function saveAndClose(newTasks) {
     try {
-      localStorage.setItem('figma_app_items', JSON.stringify(items));
+      writeTasksToStorage(newTasks);
+      setTasks(newTasks);
+      setShowForm(false);
+      setEditing(null);
     } catch (e) {
-      console.error('Persist error', e);
-      setError('Failed to save to browser storage.');
+      setError(e.message);
     }
-  }, [items]);
+  }
 
-  // CRUD operations
-  function handleCreate(e) {
-    e.preventDefault();
-    setIsSaving(true);
-    setError(null);
-    // validation
-    if (!form.title.trim()) {
-      setError('Title is required.');
-      setIsSaving(false);
-      return;
+  function handleAddClick() {
+    setEditing(null);
+    setShowForm(true);
+  }
+
+  function handleSaveTask(payload) {
+    const exists = tasks.find(t => t.id === payload.id);
+    let next;
+    if (exists) {
+      next = tasks.map(t => (t.id === payload.id ? { ...t, ...payload } : t));
+    } else {
+      next = [payload, ...tasks];
     }
-
-    setTimeout(() => {
-      const newItem = { ...form, id: uid() };
-      setItems(prev => [newItem, ...prev]);
-      setForm({ title: '', owner: '', status: 'Planned', description: '' });
-      setIsSaving(false);
-    }, 500);
+    saveAndClose(next);
   }
 
   function handleDelete(id) {
-    if (!confirm('Delete this item?')) return;
-    setItems(prev => prev.filter(it => it.id !== id));
-    if (selected && selected.id === id) setSelected(null);
+    if (!confirm("Delete this task?")) return;
+    const next = tasks.filter(t => t.id !== id);
+    saveAndClose(next);
   }
 
-  function handleSelect(item) {
-    setSelected(item === selected ? null : item);
+  function handleEdit(task) {
+    setEditing(task);
+    setShowForm(true);
   }
 
-  function handleUpdate(updated) {
-    setItems(prev => prev.map(it => (it.id === updated.id ? updated : it)));
-    setSelected(updated);
+  function handleToggleDone(id) {
+    const next = tasks.map(t => t.id === id ? { ...t, done: !t.done } : t);
+    saveAndClose(next);
   }
 
-  // filtering
-  const visible = items.filter(it => {
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      it.title.toLowerCase().includes(q) ||
-      it.owner.toLowerCase().includes(q) ||
-      it.description.toLowerCase().includes(q)
-    );
+  function handleClearStorage() {
+    if (!confirm("Clear all tasks from local storage?")) return;
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      setTasks([]);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  const filtered = tasks.filter(t => {
+    if (filter === 'all') return true;
+    if (filter === 'done') return t.done;
+    if (filter === 'active') return !t.done;
+    return true;
   });
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans">
-      <header className="max-w-7xl mx-auto mb-6">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-semibold">Project Dashboard</h1>
-            <p className="text-sm text-slate-600">A responsive app built to match Figma visuals — local browser storage, load & error states.</p>
-          </div>
+    <div className="min-h-screen bg-gray-50 p-6 sm:p-10 font-sans text-gray-800">
+      <div className="max-w-5xl mx-auto">
+        <Header count={tasks.length} />
 
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-3">
-            <input
-              aria-label="Search"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              className="w-40 md:w-64 rounded-md border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
-              placeholder="Search projects..."
-            />
-            <button
-              onClick={() => {
-                // allow user to simulate an error for demo
-                setError(prev => (prev ? null : 'Simulated error — click to clear'));
-              }}
-              className="rounded-md px-3 py-2 text-sm bg-white border border-slate-200 hover:bg-slate-50"
-            >
-              {error ? 'Clear Error' : 'Simulate Error'}
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Left pane: form */}
-        <section className="lg:col-span-1 bg-white rounded-2xl p-4 shadow-sm">
-          <h2 className="text-lg font-medium mb-3">Create Project</h2>
-          <form onSubmit={handleCreate} className="space-y-3">
-            <div>
-              <label className="block text-sm text-slate-700">Title</label>
-              <input
-                value={form.title}
-                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
-                placeholder="E.g., Landing page refresh"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-slate-700">Owner</label>
-              <input
-                value={form.owner}
-                onChange={e => setForm(f => ({ ...f, owner: e.target.value }))}
-                className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
-                placeholder="Owner name"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-slate-700">Status</label>
-              <select
-                value={form.status}
-                onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
-                className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
-              >
-                <option>Planned</option>
-                <option>In Progress</option>
-                <option>Completed</option>
+            <div className="rounded-md border bg-white p-2">
+              <select value={filter} onChange={e => setFilter(e.target.value)} className="p-1 outline-none">
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="done">Done</option>
               </select>
             </div>
-
-            <div>
-              <label className="block text-sm text-slate-700">Description</label>
-              <textarea
-                value={form.description}
-                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                rows={3}
-                className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
-                placeholder="Short description"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="inline-flex items-center gap-2 rounded-md bg-slate-900 text-white px-4 py-2 text-sm hover:opacity-95 disabled:opacity-50"
-              >
-                {isSaving ? 'Saving...' : 'Add Project'}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setForm({ title: '', owner: '', status: 'Planned', description: '' });
-                }}
-                className="rounded-md px-3 py-2 text-sm bg-white border border-slate-200"
-              >
-                Reset
-              </button>
-            </div>
-
-            {error && <div className="text-sm text-red-600">{error}</div>}
-          </form>
-
-          <div className="mt-4 text-xs text-slate-500">Tip: data is stored in your browser (localStorage).</div>
-        </section>
-
-        {/* Right pane: list + detail */}
-        <section className="lg:col-span-3 space-y-4">
-          <div className="bg-white rounded-2xl p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-md font-medium">Projects</h3>
-              <div className="text-sm text-slate-500">{visible.length} shown</div>
-            </div>
-
-            {/* Load & error states */}
-            {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-10 w-10 border-4 border-slate-300 border-t-slate-800" />
-              </div>
-            ) : error ? (
-              <div className="p-6 text-sm text-red-700 bg-red-50 rounded">{error}</div>
-            ) : visible.length === 0 ? (
-              <div className="p-6 text-sm text-slate-600">No projects match your search.</div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {visible.map(item => (
-                  <article key={item.id} className="bg-slate-50 rounded-xl p-4 border border-transparent hover:border-slate-200">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h4 className="text-sm font-semibold">{item.title}</h4>
-                        <p className="text-xs text-slate-500 mt-1">{item.owner} • <span className="font-medium">{item.status}</span></p>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleSelect(item)}
-                          aria-pressed={selected && selected.id === item.id}
-                          className="rounded-md px-2 py-1 text-xs bg-white border border-slate-200"
-                        >
-                          {selected && selected.id === item.id ? 'Selected' : 'View'}
-                        </button>
-                        <button
-                          onClick={() => handleDelete(item.id)}
-                          className="rounded-md px-2 py-1 text-xs bg-white border border-red-200 text-red-600"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-
-                    <p className="mt-3 text-xs text-slate-600">{item.description}</p>
-                  </article>
-                ))}
-              </div>
-            )}
+            <div className="text-sm text-gray-500">Showing {filtered.length} of {tasks.length}</div>
           </div>
 
-          {/* Detail / edit pane */}
-          <div className="bg-white rounded-2xl p-4 shadow-sm">
-            <h3 className="text-md font-medium mb-3">Details</h3>
-            {selected ? (
-              <ProjectDetail
-                item={selected}
-                onCancel={() => setSelected(null)}
-                onSave={handleUpdate}
-              />
-            ) : (
-              <div className="text-sm text-slate-600">Select a project card to view and edit details.</div>
-            )}
+          <div className="flex gap-2">
+            <button onClick={handleAddClick} className="px-4 py-2 bg-sky-600 text-white rounded-lg">New Task</button>
+            <button onClick={handleClearStorage} className="px-4 py-2 border rounded-lg">Clear All</button>
           </div>
-        </section>
-      </main>
+        </div>
 
-      <footer className="max-w-7xl mx-auto mt-8 text-center text-xs text-slate-400">Built with React + Tailwind • Local data only</footer>
-    </div>
-  );
-}
+        {loading && <Loading />}
+        {error && !loading && <ErrorBox message={error} onRetry={() => window.location.reload()} />}
 
-function ProjectDetail({ item, onCancel, onSave }) {
-  const [local, setLocal] = useState(item);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
+        {!loading && !error && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Left column: form / details area (span across for mobile) */}
+            <div className="sm:col-span-2 lg:col-span-1">
+              <div className="sticky top-6">
+                <div className="bg-white rounded-2xl p-4 border shadow-sm">
+                  {showForm ? (
+                    <>
+                      <div className="mb-3 font-medium">{editing ? 'Edit Task' : 'Create Task'}</div>
+                      <TaskForm
+                        initial={editing}
+                        onCancel={() => { setShowForm(false); setEditing(null); }}
+                        onSave={handleSaveTask}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-sm text-gray-600">Quick actions</div>
+                      <div className="mt-4 flex flex-col gap-2">
+                        <button onClick={handleAddClick} className="px-3 py-2 rounded-lg border">+ Add task</button>
+                        <button onClick={() => { setFilter('done'); }} className="px-3 py-2 rounded-lg border">Show completed</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
 
-  useEffect(() => setLocal(item), [item]);
+            {/* Right columns: task cards */}
+            <div className="sm:col-span-2 lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filtered.length === 0 ? (
+                <div className="col-span-full bg-white rounded-2xl p-6 border text-center text-gray-500">No tasks yet — create one to get started.</div>
+              ) : (
+                filtered.map(task => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onToggleDone={handleToggleDone}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        )}
 
-  function save() {
-    setErr(null);
-    if (!local.title.trim()) {
-      setErr('Title required');
-      return;
-    }
-    setSaving(true);
-    setTimeout(() => {
-      onSave(local);
-      setSaving(false);
-    }, 400);
-  }
-
-  return (
-    <div className="space-y-3">
-      <div>
-        <label className="block text-xs text-slate-600">Title</label>
-        <input value={local.title} onChange={e => setLocal(l => ({ ...l, title: e.target.value }))} className="mt-1 block w-full rounded-md border px-3 py-2 text-sm" />
-      </div>
-
-      <div>
-        <label className="block text-xs text-slate-600">Owner</label>
-        <input value={local.owner} onChange={e => setLocal(l => ({ ...l, owner: e.target.value }))} className="mt-1 block w-full rounded-md border px-3 py-2 text-sm" />
-      </div>
-
-      <div>
-        <label className="block text-xs text-slate-600">Status</label>
-        <select value={local.status} onChange={e => setLocal(l => ({ ...l, status: e.target.value }))} className="mt-1 block w-full rounded-md border px-3 py-2 text-sm">
-          <option>Planned</option>
-          <option>In Progress</option>
-          <option>Completed</option>
-        </select>
-      </div>
-
-      <div>
-        <label className="block text-xs text-slate-600">Description</label>
-        <textarea value={local.description} onChange={e => setLocal(l => ({ ...l, description: e.target.value }))} rows={4} className="mt-1 block w-full rounded-md border px-3 py-2 text-sm" />
-      </div>
-
-      {err && <div className="text-red-600 text-sm">{err}</div>}
-
-      <div className="flex items-center gap-2">
-        <button onClick={save} disabled={saving} className="rounded-md bg-slate-900 text-white px-4 py-2 text-sm disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
-        <button onClick={onCancel} className="rounded-md px-3 py-2 bg-white border border-slate-200 text-sm">Cancel</button>
+        <footer className="mt-10 text-center text-sm text-gray-400">Built with React + Tailwind • Local-only storage</footer>
       </div>
     </div>
   );
